@@ -44,12 +44,23 @@ class RestServiceTest {
     private String GET_ALL_ACCOUNTS = "http://localhost:4567/getAllAccounts";
     private String EXCHANGE = "http://localhost:4567/performExchange";
 
+    /*
+        please note
+        some of cases has been checked manually using postman and prepared requests
+        in case of further maintenance and code improvements
+        it is strongly recommended to add tests here
+     */
+
     @BeforeEach
     void init() {
         Application.initProperties();
         daoService = new DAOServiceImpl(new DBConnector());
         restService = new RestService(daoService);
     }
+
+    /*
+    TODO: use carefully unless UAT is run of physical DB and test in-memory DB
+     */
 
     @AfterEach
     void cleanUp() {
@@ -66,20 +77,24 @@ class RestServiceTest {
         httpClient.close();
     }
 
+    /*
+        main goal of this test is to make simultaneous exchange operations which will cause
+        update operation for same account
+        in that case one of requests have to respond with message like "Can't update" depending on how much rows has been updated
+     */
     @Test
     void transferMoneySimultaneous() throws InterruptedException, IOException {
         CloseableHttpClient httpClient = HttpClients.createDefault();
         ExecutorService executorService = Executors.newFixedThreadPool(10);
-        ArrayList<Account> accounts = new ArrayList<>();
         int accountsCount = 100;
         int initialAmount = 100;
+// also checked for 100_000
         int transfersCount = 1000;
         BigDecimal ant = BigDecimal.valueOf(initialAmount);
         Random random = new Random();
 
         for (int i = 0; i < accountsCount; i++) {
             Account acc = new Account(i, "test" + i, ant);
-            accounts.add(acc);
             createAndExecute(acc, CREATE_ACCOUNT, httpClient);
         }
 
@@ -96,7 +111,6 @@ class RestServiceTest {
             });
         }
         executorService.invokeAll(tasks);
-
         List<Account> allAccounts = getAllAccounts(httpClient);
         BigDecimal reduce = allAccounts.stream().map(Account::getBalance).reduce(BigDecimal.ZERO, BigDecimal::add);
         LOG.debug("Total amount {} ", reduce);
@@ -121,7 +135,7 @@ class RestServiceTest {
         HttpUriRequest request = new HttpGet(GET_ACCOUNT + id);
         CloseableHttpResponse response = httpClient.execute(request);
         HttpEntity entity = response.getEntity();
-        CompositeResponse compositeResponse = retrieveResourceFromResponse(EntityUtils.toString(entity), CompositeResponse.class);
+        CompositeResponse compositeResponse = new Gson().fromJson(EntityUtils.toString(entity), CompositeResponse.class);
         Account account = compositeResponse.getAccount();
         handleResponse(response);
         return account;
@@ -131,7 +145,7 @@ class RestServiceTest {
         HttpUriRequest request = new HttpGet(GET_ALL_ACCOUNTS);
         CloseableHttpResponse response = httpClient.execute(request);
         HttpEntity entity = response.getEntity();
-        CompositeResponse compositeResponse = retrieveResourceFromResponse(EntityUtils.toString(entity), CompositeResponse.class);
+        CompositeResponse compositeResponse = new Gson().fromJson(EntityUtils.toString(entity), CompositeResponse.class);
         handleResponse(response);
         return compositeResponse.getAccounts();
     }
@@ -151,7 +165,29 @@ class RestServiceTest {
         handleResponse(response);
 
         //check Jon
-        Account accountJon = getAccountFromRestForId(1, HttpClients.createDefault());
+        Account accountJon = getAccountFromRestForId(1, httpClient);
+        assertEquals(accountJon.getBalance(), jon.getBalance().subtract(amt));
+
+        //check Snow
+        Account accountSnow = getAccountFromRestForId(2, httpClient);
+        assertEquals(accountSnow.getBalance(), snow.getBalance().add(amt));
+    }
+
+    void checkOppositeTransfer() throws IOException {
+        CloseableHttpClient httpClient = HttpClients.createDefault();
+        Account jon = new Account(1, "Jon", BigDecimal.valueOf(100));
+        Account snow = new Account(2, "Snow", BigDecimal.valueOf(100));
+        createAndExecute(jon, CREATE_ACCOUNT, httpClient);
+        createAndExecute(snow, CREATE_ACCOUNT, httpClient);
+
+        //makeExchange
+        BigDecimal amt = BigDecimal.valueOf(100);
+        HttpUriRequest postRequest = createPostRequestForExchange(jon, snow, EXCHANGE, amt);
+        CloseableHttpResponse response = httpClient.execute(postRequest);
+        handleResponse(response);
+
+        //check Jon
+        Account accountJon = getAccountFromRestForId(1, httpClient);
         assertEquals(accountJon.getBalance(), jon.getBalance().subtract(amt));
 
         //check Snow
@@ -171,10 +207,5 @@ class RestServiceTest {
                 .setUri(uri)
                 .setEntity(new StringEntity(new Gson().toJson(new ExchangeRequest(accountFrom, accountTo, amount)), ContentType.APPLICATION_JSON))
                 .build();
-    }
-
-
-    public static <T> T retrieveResourceFromResponse(String jsonFromResponse, Class<T> clazz) {
-        return new Gson().fromJson(jsonFromResponse, clazz);
     }
 }

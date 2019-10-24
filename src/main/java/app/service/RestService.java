@@ -1,11 +1,14 @@
 package app.service;
 
+import app.Bootstrap;
 import app.model.Account;
 import app.model.CompositeResponse;
 import app.model.CompositeResponseBuilder;
 import app.model.ExchangeRequest;
 import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -14,6 +17,7 @@ import static spark.Spark.post;
 
 public class RestService {
     ReentrantLock lock = new ReentrantLock();
+    private static Logger LOG = LoggerFactory.getLogger(RestService.class);
     private final DAOService daoService;
 
     public RestService(DAOService daoService) {
@@ -45,6 +49,7 @@ public class RestService {
             try {
                 id = Integer.parseInt(request.params(":id"));
             } catch (NumberFormatException e) {
+                LOG.error(e.getMessage());
                 e.printStackTrace();
                 return new Gson().toJson(new CompositeResponseBuilder().setError(true).setMessage("Invalid Number. " + e.getMessage()));
             }
